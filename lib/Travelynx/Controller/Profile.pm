@@ -359,6 +359,96 @@ sub journey_details {
 	);
 }
 
+sub journey_copy {
+	my ($self)     = @_;
+	my $name       = $self->param('name');
+	my $journey_id = $self->param('journey_id');
+
+	my $journey = $self->journey_check_access(
+		journey_id => $journey_id,
+		name       => $name,
+		options    => {
+			with_datetime   => 1,
+			with_polyline   => 1,
+			with_visibility => 1,
+		}
+	);
+
+	if ( not $journey ) {
+		$self->render(
+			'journey',
+			status  => 404,
+			error   => 'notfound',
+			journey => {}
+		);
+		return;
+	}
+
+	my $uid = $self->current_user->{id};
+
+	my $db = $self->pg->db;
+	my $tx = $db->begin;
+
+	my ( $new_journey_id, $error ) = $self->journeys->add(
+		db              => $db,
+		uid             => $uid,
+		backend_id      => $journey->{backend_id},
+		cancelled       => $journey->{cancelled},
+		checkin_time    => $journey->{checkin},
+		edited          => $journey->{edited},
+		train_type      => $journey->{type},
+		train_line      => $journey->{line},
+		train_no        => $journey->{no},
+		train_id        => $journey->{id},
+		dep_station     => $journey->{from_eva},
+		dep_platform    => $journey->{from_platform},
+		sched_departure => $journey->{sched_departure},
+		rt_departure    => $journey->{rt_departure},
+		arr_station     => $journey->{to_eva},
+		arr_platform    => $journey->{to_platform},
+		sched_arrival   => $journey->{sched_arrival},
+		rt_arrival      => $journey->{rt_arrival},
+		json_route      => $journey->{route},
+		messages        => $journey->{messages},
+		user_data       => $journey->{user_data},
+	);
+
+	if ( not $error ) {
+		my $journey = $self->journeys->get_single(
+			uid        => $uid,
+			db         => $db,
+			journey_id => $new_journey_id,
+			verbose    => 1
+		);
+		$error = $self->journeys->sanity_check($journey);
+	}
+
+	if ($error) {
+		$self->render(
+			'add_journey',
+			with_autocomplete => 1,
+			status            => 400,
+			error             => $error,
+		);
+	}
+	else {
+		if ( $journey->{polyline} ) {
+			$self->app->journeys->set_polyline(
+				db         => $db,
+				uid        => $uid,
+				journey_id => $new_journey_id,
+				edited     => $journey->{edited},
+				from_eva   => $journey->{from_eva},
+				to_eva     => $journey->{to_eva},
+				polyline   => $journey->{polyline},
+			);
+		}
+
+		$tx->commit;
+		$self->redirect_to("/");
+	}
+}
+
 sub user_status {
 	my ($self) = @_;
 
